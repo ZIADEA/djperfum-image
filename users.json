@@ -1,0 +1,21 @@
+{
+  "djeri": {
+    "password": "djeri",
+    "cart": [],
+    "favorites": [
+      "AMOUAGE HONOR"
+    ],
+    "history": [
+      {
+        "items": [
+          {
+            "name": "1 MILLION",
+            "price": 330.0,
+            "qte_ml": 30
+          }
+        ],
+        "total": 330.0
+      }
+    ]
+  }
+}
