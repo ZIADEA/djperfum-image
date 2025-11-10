@@ -405,22 +405,14 @@ if page == "Accueil":
         """
     ### Concept
 
-    DJERIPERFUM est une mini-boutique de parfums en décants (10/20/30 ml) avec un
-    assistant virtuel intelligent développé avec Botpress.
+    DJERIPERFUM est une mini-boutique de parfums de 10/20/30 ml avec un
+    assistant virtuel intelligent développé avec Botpress .
+    L'objectif est de permettre aux clients de découvrir et acheter des
+    parfums , tout en bénéficiant de recommandations personnalisées .
 
-    Fonctions :
-    - Catalogue classé par **Homme**, **Femme** et **Mixte/Niche**
-    - Ajout au **panier**, favoris, et consultation de l'**historique d'achat**
-    - Intégration d'un **chatbot Botpress** :
-        - recommandation personnalisée
-        - FAQ sur les parfums
-        - exploration des ingrédients
-        - promotions
-    - Authentification simple (Login / Signup) avec persistance dans un fichier JSON
     """
     )
 
-    st.info("Utilisez le menu à gauche pour naviguer dans les différentes pages.")
 
 elif page == "Parfums homme":
     st.title("Parfums Homme")
@@ -533,8 +525,7 @@ elif page == "Me contacter":
     )
 
     st.write("Email : contact@djperfum.ma")
-    st.write("Instagram : @djperfum_officiel")
-    st.write("Téléphone : +212 6 XX XX XX XX")
+    st.write("Téléphone : +212 6 25 50 88 21")
 
 elif page == "Login / Signup":
     st.title("Login / Signup")
