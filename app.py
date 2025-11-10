@@ -520,7 +520,8 @@ elif page == "Me contacter":
 
     st.markdown(
         """
-    Informations de contact (fictives pour la démonstration) :
+    Informations de contact 
+     Pour toute question ou demande, n'hésitez pas à nous contacter via les moyens suivants :
     """
     )
 
