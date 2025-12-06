@@ -20,6 +20,13 @@ CATALOG_CSV = "Catalogue_Parfums_Complet.csv"   # ton CSV actuel
 USERS_FILE = "users.json"
 COMPO_FILE = "parfums_composition.txt"          # nouveau fichier texte
 
+# ================== ADMIN ======================
+ADMIN_USERS = ["admin"]  # liste des comptes qui ont l'accès admin
+
+def is_admin():
+    user = st.session_state.get("user")
+    return user in ADMIN_USERS
+
 # Lien shareable Botpress
 CHATBOT_URL = (
     "https://cdn.botpress.cloud/webchat/v3.3/shareable.html"
@@ -643,6 +650,7 @@ PAGES = [
     "Favoris",
     "Me contacter",
     "Login / Signup",
+    "Admin",
 ]
 
 # S'assurer que la page stockée est valide
@@ -1027,3 +1035,68 @@ elif page == "Login / Signup":
             st.session_state["favorites"] = set()
             st.session_state["history"] = []
             st.success("Déconnecté.")
+
+
+elif page == "Admin":
+    st.title("Pôle administration – commandes clients")
+    require_login()
+
+    if not is_admin():
+        st.error("Accès réservé à l’administrateur.")
+    else:
+        users = load_users()
+
+        rows = []
+        for username, data in users.items():
+            history = data.get("history", [])
+            for order in history:
+                ts = order.get("timestamp")
+                total_cmd = float(order.get("total", 0) or 0)
+
+                for item in order.get("items", []):
+                    name = item.get("name")
+                    qte_ml = item.get("qte_ml")
+                    units = int(item.get("units", 1))
+                    price_unit = float(item.get("price", 0) or 0)
+                    total_ligne = price_unit * units
+
+                    rows.append(
+                        {
+                            "user": username,
+                            "timestamp": ts,
+                            "parfum": name,
+                            "qte_ml": qte_ml,
+                            "nb_flacons": units,
+                            "prix_unitaire_DH": price_unit,
+                            "total_ligne_DH": total_ligne,
+                            "total_commande_DH": total_cmd,
+                        }
+                    )
+
+        if not rows:
+            st.info("Aucune commande enregistrée pour le moment.")
+        else:
+            df_cmd = pd.DataFrame(rows)
+
+            st.subheader("Toutes les commandes")
+            st.dataframe(df_cmd, use_container_width=True)
+
+            # Bouton pour télécharger les commandes en CSV
+            csv_data = df_cmd.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Télécharger les commandes (CSV)",
+                data=csv_data,
+                file_name="commandes_clients.csv",
+                mime="text/csv",
+            )
+
+            # (optionnel) Petit résumé par client
+            st.markdown("---")
+            st.subheader("Résumé par client")
+            resume = (
+                df_cmd.groupby("user")["total_commande_DH"]
+                .max()
+                .reset_index()
+                .rename(columns={"total_commande_DH": "montant_max_commande_DH"})
+            )
+            st.dataframe(resume, use_container_width=True)
