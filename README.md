@@ -1,4 +1,4 @@
-![Uploading image.png…]()
+
 for the  AI bot on perfum web site
 lien du depot github : https://github.com/ZIADEA/djperfum-image
 toute l application en ligne  : https://djperfum-image-fksnza84rdrvv6b4jyjvwu.streamlit.app/
