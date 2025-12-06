@@ -1,5 +1,8 @@
 import json
+from datetime import datetime
 from pathlib import Path
+import smtplib
+from email.mime.text import MIMEText
 
 import pandas as pd
 import streamlit as st
@@ -23,24 +26,38 @@ CHATBOT_URL = (
     "?configUrl=https://files.bpcontent.cloud/2025/10/06/14/20251006143331-TLGNO0TS.json"
 )
 
+# ================== UTILITAIRE RERUN (compat) ======================
+
+def do_rerun():
+    """Compatibilité entre st.rerun (récent) et st.experimental_rerun (ancien)."""
+    try:
+        st.rerun()
+    except AttributeError:
+        st.experimental_rerun()
+
 # ================== FONCTIONS UTILES ==================
 
 @st.cache_data
 def load_catalog():
-    """Charge le catalogue CSV et ajoute la colonne image_path."""
+    """
+    Charge le catalogue CSV et force un ID interne cohérent :
+
+    - image_id = index de la ligne + 1
+    - image_path = images/{image_id}.png
+
+    Donc la ligne 1 du CSV = id 1 = images/1.png
+         la ligne 2 du CSV = id 2 = images/2.png
+         etc.
+    """
     try:
         df = pd.read_csv(CATALOG_CSV)
     except Exception:
         return pd.DataFrame()
 
+    # On ignore complètement les colonnes d'ID existantes,
+    # on repart sur un index propre.
     df = df.reset_index(drop=True)
-
-    # si une colonne image_id existe déjà on l’utilise, sinon index + 1
-    if "image_id" in df.columns:
-        df["image_id"] = df["image_id"].astype(int)
-    else:
-        df["image_id"] = df.index + 1
-
+    df["image_id"] = df.index + 1
     df["image_path"] = df["image_id"].apply(lambda i: f"images/{i}.png")
     return df
 
@@ -85,10 +102,6 @@ def load_compositions():
     return compositions
 
 
-compositions = load_compositions()
-
-
-
 def load_users():
     """Charge le fichier users.json (ou dict vide)."""
     path = Path(USERS_FILE)
@@ -114,6 +127,20 @@ def ensure_session_state():
     st.session_state.setdefault("cart", [])
     st.session_state.setdefault("favorites", set())
     st.session_state.setdefault("history", [])
+    st.session_state.setdefault("page", "Accueil")  # page courante pour la nav
+
+
+def normalize_cart_items(cart_list):
+    """
+    S'assure que chaque item du panier a un champ 'units' (nombre de flacons).
+    Utile pour compatibilité avec d'anciens fichiers users.json.
+    """
+    normalized = []
+    for item in cart_list:
+        if "units" not in item:
+            item["units"] = 1
+        normalized.append(item)
+    return normalized
 
 
 def sync_current_user_to_file():
@@ -125,7 +152,10 @@ def sync_current_user_to_file():
     if user not in users:
         users[user] = {"password": st.session_state.get("password_plain") or ""}
     users[user]["password"] = st.session_state.get("password_plain") or ""
-    users[user]["cart"] = st.session_state.get("cart", [])
+    # normalisation du panier avant sauvegarde
+    cart = normalize_cart_items(st.session_state.get("cart", []))
+    st.session_state["cart"] = cart
+    users[user]["cart"] = cart
     users[user]["favorites"] = list(st.session_state.get("favorites", set()))
     users[user]["history"] = st.session_state.get("history", [])
     save_users(users)
@@ -137,7 +167,8 @@ def login_user(username: str, password: str) -> bool:
         st.session_state["user"] = username
         st.session_state["password_plain"] = password
         data = users[username]
-        st.session_state["cart"] = data.get("cart", [])
+        # normalisation du panier pour intégrer 'units'
+        st.session_state["cart"] = normalize_cart_items(data.get("cart", []))
         st.session_state["favorites"] = set(data.get("favorites", []))
         st.session_state["history"] = data.get("history", [])
         return True
@@ -164,15 +195,24 @@ def signup_user(username: str, password: str):
 
 
 def require_login():
+    """Affiche un message + bouton Se connecter si l'utilisateur n'est pas logué."""
     if st.session_state.get("user") is None:
         st.warning("Vous devez être connecté pour accéder à cette page.")
+        if st.button("Se connecter", key="require_login_btn"):
+            st.session_state["page"] = "Login / Signup"
+            do_rerun()
         st.stop()
 
 
-def add_to_cart(name, price, qte_ml):
-    st.session_state["cart"].append(
-        {"name": name, "price": price, "qte_ml": qte_ml}
-    )
+def add_to_cart(name, price, qte_ml, units=1):
+    """Ajoute un parfum au panier, avec quantité en ml + nombre de flacons."""
+    item = {
+        "name": name,
+        "price": price,
+        "qte_ml": qte_ml,
+        "units": int(units) if units else 1,
+    }
+    st.session_state["cart"].append(item)
     sync_current_user_to_file()
 
 
@@ -183,16 +223,61 @@ def add_to_favorites(name):
     sync_current_user_to_file()
 
 
-def render_bot_link():
-    """Lien en haut des pages catalogue pour ouvrir le chatbot."""
-    st.markdown(
-        f"[Discuter avec notre bot (ouvrir le chatbot)]({CHATBOT_URL})",
-        help="Ouvre l'interface Botpress dans un nouvel onglet.",
-    )
+def get_cart_item_count():
+    """Retourne le nombre total de flacons dans le panier."""
+    cart = st.session_state.get("cart", [])
+    return sum(int(item.get("units", 1)) for item in cart)
 
+
+def render_bot_link(prefix: str):
+    """
+    Bouton pour aller à la page Chatbot (navigation interne),
+    au lieu d'un lien externe.
+    """
+    if st.button(
+        "Discuter avec notre bot (ouvrir le chatbot)",
+        key=f"bot_btn_{prefix}",
+    ):
+        st.session_state["page"] = "Chatbot"
+        do_rerun()
+
+def get_parfum_by_name(name: str):
+    """
+    Retourne la ligne du catalogue (Series) correspondant Çÿ ce parfum,
+    ou None si introuvable.
+    """
+    if df_catalog is None or df_catalog.empty:
+        return None
+
+    sub = df_catalog[df_catalog["name"] == name]
+    if sub.empty:
+        sub = df_catalog[df_catalog["name"].str.lower() == str(name).lower()]
+
+    if sub.empty:
+        return None
+
+    return sub.iloc[0]
+
+def get_image_path_for_name(name: str) -> str:
+    """
+    Retourne le chemin d'image pour un parfum donné, à partir de df_catalog.
+    On fait une recherche exacte puis insensible à la casse.
+    """
+    row = get_parfum_by_name(name)
+    if row is None:
+        return ""
+    return row.get("image_path", "") or ""
 
 def render_product_list(df, key_prefix: str):
-    """Affiche une liste de produits avec recherche, tri, quantités, boutons panier/favoris + lien fiche parfum."""
+    """
+    Affiche une liste de produits avec :
+    - recherche
+    - tri
+    - choix ml
+    - nombre de flacons
+    - boutons panier/favoris
+    - lien fiche parfum
+    """
     if df.empty:
         st.info("Aucun parfum dans cette catégorie.")
         return
@@ -261,6 +346,12 @@ def render_product_list(df, key_prefix: str):
         with col3:
             if user is None:
                 st.caption("Connectez-vous pour ajouter au panier ou aux favoris.")
+                if st.button(
+                    "Aller à la page Login / Signup",
+                    key=f"login_redirect_{key_prefix}_{idx}",
+                ):
+                    st.session_state["page"] = "Login / Signup"
+                    do_rerun()
             else:
                 qty = st.selectbox(
                     "Quantité (ml)",
@@ -275,11 +366,20 @@ def render_product_list(df, key_prefix: str):
                 else:
                     price = price30
 
+                units = st.number_input(
+                    "Nombre de flacons",
+                    min_value=1,
+                    max_value=20,
+                    step=1,
+                    value=1,
+                    key=f"units_{key_prefix}_{idx}",
+                )
+
                 if st.button(
                     "Ajouter au panier",
                     key=f"add_cart_{key_prefix}_{idx}",
                 ):
-                    add_to_cart(name, price, qty)
+                    add_to_cart(name, price, qty, units)
                     st.success("Ajouté au panier.")
 
                 if st.button(
@@ -293,7 +393,7 @@ def render_product_list(df, key_prefix: str):
 
 
 def render_parfum_detail(df_catalog, compo_map, parfum_id: int):
-    """Affiche la fiche détaillée d'un parfum à partir de son image_id."""
+    """Affiche la fiche détaillée d'un parfum à partir de son image_id (avec ajout panier + favoris)."""
     if df_catalog.empty:
         st.error("Catalogue vide ou introuvable.")
         return
@@ -329,6 +429,41 @@ def render_parfum_detail(df_catalog, compo_map, parfum_id: int):
         st.write(f"- 20 ml : **{price20:.0f} DH**")
         st.write(f"- 30 ml : **{price30:.0f} DH**")
 
+        st.markdown("---")
+        user = st.session_state.get("user")
+        if user is not None:
+            qty_ml = st.selectbox(
+                "Quantité (ml)",
+                [10, 20, 30],
+                key=f"detail_qty_{parfum_id}",
+            )
+            if qty_ml == 10:
+                price = price10
+            elif qty_ml == 20:
+                price = price20
+            else:
+                price = price30
+
+            units = st.number_input(
+                "Nombre de flacons",
+                min_value=1,
+                max_value=20,
+                step=1,
+                value=1,
+                key=f"detail_units_{parfum_id}",
+            )
+
+            if st.button("Ajouter au panier", key=f"detail_add_cart_{parfum_id}"):
+                add_to_cart(name, price, qty_ml, units)
+                st.success("Ajouté au panier.")
+
+            if st.button("Ajouter aux favoris", key=f"detail_add_fav_{parfum_id}"):
+                add_to_favorites(name)
+                st.success("Ajouté aux favoris.")
+        else:
+            pass
+
+
     # Composition
     comp = compo_map.get(name.upper())
     st.markdown("---")
@@ -346,19 +481,66 @@ def render_parfum_detail(df_catalog, compo_map, parfum_id: int):
     )
 
 
+def send_contact_email(nom, email, objet, message):
+    """
+    Envoie un email à djeryala@gmail.com en utilisant st.secrets.
+
+    secrets.toml (exemple) :
+    [email]
+    host = "smtp.gmail.com"
+    port = 587
+    username = "ton_adresse_gmail"
+    password = "mot_de_passe_ou_app_password"
+    """
+    try:
+        host = st.secrets["email"]["host"]
+        port = int(st.secrets["email"]["port"])
+        username = st.secrets["email"]["username"]
+        password = st.secrets["email"]["password"]
+    except Exception:
+        raise RuntimeError(
+            "Configuration email manquante dans st.secrets['email']."
+        )
+
+    to_email = "djeryala@gmail.com"
+
+    body = f"""Nouveau message via DJERIPERFUM
+
+Nom : {nom}
+Email : {email}
+Objet : {objet}
+
+Message :
+{message}
+"""
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = objet if objet else "Nouveau message via DJERIPERFUM"
+    msg["From"] = username
+    msg["To"] = to_email
+
+    with smtplib.SMTP(host, port) as server:
+        server.starttls()
+        server.login(username, password)
+        server.send_message(msg)
+
+
 # ================== DONNÉES & ÉTAT ==========================
 
 df_catalog = load_catalog()
 compo_map = load_compositions()
 ensure_session_state()
 
-# ========== ROUTE DÉTAILLÉE VIA QUERY PARAM =========
+
+# ========== ROUTE DÉTAILLÉE VIA QUERY PARAM POUR PARFUM =========
 
 params = st.query_params
-parfum_id_param = params.get("parfum_id", [None])[0]
+
+# Sur les versions récentes de Streamlit, params["parfum_id"] est une **chaîne**,
+# pas une liste, donc on NE met plus [0].
+parfum_id_param = params.get("parfum_id", None)
 
 if parfum_id_param is not None:
-    # Page "fiche parfum" spéciale
     try:
         pid = int(parfum_id_param)
         render_parfum_detail(df_catalog, compo_map, pid)
@@ -367,7 +549,24 @@ if parfum_id_param is not None:
         # si l'id n'est pas un entier, on continue normalement
         pass
 
-# ================== NAVIGATION =======================
+# ========== NAVIGATION PAR RADIO + SESSION_STATE ==========
+
+PAGES = [
+    "Accueil",
+    "Parfums homme",
+    "Parfums femme",
+    "Parfums mixte / niche",
+    "Chatbot",
+    "Panier",
+    "Historique d'achat",
+    "Favoris",
+    "Me contacter",
+    "Login / Signup",
+]
+
+# S'assurer que la page stockée est valide
+if st.session_state["page"] not in PAGES:
+    st.session_state["page"] = "Accueil"
 
 st.sidebar.title("DJERIPERFUM")
 
@@ -377,21 +576,23 @@ if user:
 else:
     st.sidebar.write("Non connecté")
 
-page = st.sidebar.radio(
+# Badge nombre d'articles dans le panier
+cart_count = get_cart_item_count()
+st.sidebar.markdown(f"**Panier : {cart_count} article(s)**")
+
+page_radio = st.sidebar.radio(
     "Navigation",
-    [
-        "Accueil",
-        "Parfums homme",
-        "Parfums femme",
-        "Parfums mixte / niche",
-        "Chatbot",
-        "Panier",
-        "Historique d'achat",
-        "Favoris",
-        "Me contacter",
-        "Login / Signup",
-    ],
+    PAGES,
+    index=PAGES.index(st.session_state["page"]),
+    key="nav_radio",
 )
+
+# Si l'utilisateur change de page via le menu, on met à jour la page et on relance
+if page_radio != st.session_state["page"]:
+    st.session_state["page"] = page_radio
+    do_rerun()
+
+page = st.session_state["page"]
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Projet Botpress + Streamlit — DJERIPERFUM")
@@ -406,17 +607,15 @@ if page == "Accueil":
     ### Concept
 
     DJERIPERFUM est une mini-boutique de parfums de 10/20/30 ml avec un
-    assistant virtuel intelligent développé avec Botpress .
+    assistant virtuel intelligent développé avec Botpress.
     L'objectif est de permettre aux clients de découvrir et acheter des
-    parfums , tout en bénéficiant de recommandations personnalisées .
-
+    parfums, tout en bénéficiant de recommandations personnalisées.
     """
     )
 
-
 elif page == "Parfums homme":
     st.title("Parfums Homme")
-    render_bot_link()
+    render_bot_link("homme")
 
     if df_catalog.empty:
         st.warning("Catalogue vide ou fichier CSV manquant.")
@@ -427,7 +626,7 @@ elif page == "Parfums homme":
 
 elif page == "Parfums femme":
     st.title("Parfums Femme")
-    render_bot_link()
+    render_bot_link("femme")
 
     if df_catalog.empty:
         st.warning("Catalogue vide ou fichier CSV manquant.")
@@ -438,7 +637,7 @@ elif page == "Parfums femme":
 
 elif page == "Parfums mixte / niche":
     st.title("Parfums Mixte / Niche")
-    render_bot_link()
+    render_bot_link("mixte")
 
     if df_catalog.empty:
         st.warning("Catalogue vide ou fichier CSV manquant.")
@@ -466,26 +665,105 @@ elif page == "Panier":
     require_login()
 
     cart = st.session_state["cart"]
+    cart = normalize_cart_items(cart)
+    st.session_state["cart"] = cart
+
     if not cart:
         st.info("Votre panier est vide.")
     else:
-        total = 0
-        for item in cart:
-            name = item["name"]
-            price = item["price"]
-            qte = item["qte_ml"]
-            st.write(f"- {name} — {qte} ml — {price:.0f} DH")
-            total += price
-
-        st.write(f"**Total : {total:.0f} DH**")
-
-        if st.button("Valider l'achat"):
-            st.session_state["history"].append(
-                {"items": cart.copy(), "total": total}
-            )
+        # Bouton pour vider tout le panier
+        if st.button("Vider tout le panier"):
             st.session_state["cart"] = []
             sync_current_user_to_file()
-            st.success("Achat validé et ajouté à l'historique.")
+            st.success("Panier vidé.")
+        else:
+            st.markdown("### Détail des articles")
+
+            total = 0.0
+            indices_to_delete = []
+            changed = False
+
+            for i, item in enumerate(cart):
+                name = item["name"]
+                price = float(item["price"])
+                qte = item["qte_ml"]
+                units = int(item.get("units", 1))
+                parfum_row = get_parfum_by_name(name)
+                image_path = ""
+                image_id = None
+                if parfum_row is not None:
+                    image_path = parfum_row.get("image_path", "") or ""
+                    image_id = (
+                        int(parfum_row.get("image_id"))
+                        if "image_id" in parfum_row
+                        else None
+                    )
+
+                # 5 colonnes : image | détails | qté flacons | prix | suppression
+                cols = st.columns([1, 3, 2, 2, 2])
+
+                with cols[0]:
+                    if image_path:
+                        try:
+                            st.image(image_path, width=70)
+                        except Exception:
+                            pass
+
+                with cols[1]:
+                    if image_id is not None:
+                        st.markdown(f"[**{name}**](?parfum_id={image_id})")
+                    else:
+                        st.write(f"**{name}**")
+                    st.write(f"{qte} ml")
+
+                with cols[2]:
+                    new_units = st.number_input(
+                        "Nombre de flacons",
+                        min_value=1,
+                        max_value=50,
+                        step=1,
+                        value=units,
+                        key=f"cart_units_{i}",
+                    )
+                    if new_units != units:
+                        cart[i]["units"] = int(new_units)
+                        changed = True
+
+                with cols[3]:
+                    line_total = price * cart[i]["units"]
+                    st.write(f"Prix unitaire : {price:.0f} DH")
+                    st.write(f"Total ligne : {line_total:.0f} DH")
+                    total += line_total
+
+                with cols[4]:
+                    if st.button("Supprimer", key=f"del_{i}"):
+                        indices_to_delete.append(i)
+
+            # Suppression des lignes demandées
+            if indices_to_delete:
+                for idx in sorted(indices_to_delete, reverse=True):
+                    cart.pop(idx)
+                changed = True
+
+            st.session_state["cart"] = cart
+
+            if changed:
+                sync_current_user_to_file()
+
+            st.markdown("---")
+            st.write(f"**Total : {total:.0f} DH**")
+
+            if st.button("Valider l'achat"):
+                st.session_state["history"].append(
+                    {
+                        "items": cart.copy(),
+                        "total": total,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+                st.session_state["cart"] = []
+                sync_current_user_to_file()
+                st.success("Achat validé et ajouté à l'historique.")
 
 elif page == "Historique d'achat":
     st.title("Historique d'achat")
@@ -497,10 +775,49 @@ elif page == "Historique d'achat":
     else:
         for i, order in enumerate(history, start=1):
             st.subheader(f"Achat {i}")
+            ts = order.get("timestamp")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    st.caption(dt.strftime("Date et heure : %d/%m/%Y %H:%M"))
+                except Exception:
+                    st.caption(f"Date et heure : {ts}")
             for item in order["items"]:
-                st.write(
-                    f"- {item['name']} — {item['qte_ml']} ml — {item['price']:.0f} DH"
-                )
+                units = int(item.get("units", 1))
+                name = item["name"]
+                qte = item["qte_ml"]
+                price = float(item["price"])
+                parfum_row = get_parfum_by_name(name)
+                image_path = ""
+                image_id = None
+                if parfum_row is not None:
+                    image_path = parfum_row.get("image_path", "") or ""
+                    image_id = (
+                        int(parfum_row.get("image_id"))
+                        if "image_id" in parfum_row
+                        else None
+                    )
+
+                cols = st.columns([1, 4])
+
+                with cols[0]:
+                    if image_path:
+                        try:
+                            st.image(image_path, width=60)
+                        except Exception:
+                            pass
+
+                with cols[1]:
+                    if image_id is not None:
+                        st.markdown(
+                            f"[**{name}**](?parfum_id={image_id})"
+                            f" — {qte} ml — {units} flacon(s) — {price:.0f} DH / flacon"
+                        )
+                    else:
+                        st.write(
+                            f"- **{name}** — {qte} ml — {units} flacon(s) — {price:.0f} DH / flacon"
+                        )
+
             st.write(f"Total : {order['total']:.0f} DH")
             st.markdown("---")
 
@@ -513,20 +830,75 @@ elif page == "Favoris":
         st.info("Aucun parfum en favori.")
     else:
         for name in sorted(favs):
-            st.write(f"- {name}")
+            parfum_row = get_parfum_by_name(name)
+            image_path = ""
+            image_id = None
+            if parfum_row is not None:
+                image_path = parfum_row.get("image_path", "") or ""
+                image_id = (
+                    int(parfum_row.get("image_id"))
+                    if "image_id" in parfum_row
+                    else None
+                )
+
+            cols = st.columns([1, 4])
+
+            with cols[0]:
+                if image_path:
+                    try:
+                        st.image(image_path, width=60)
+                    except Exception:
+                        pass
+
+            with cols[1]:
+                if image_id is not None:
+                    st.markdown(f"[**{name}**](?parfum_id={image_id})")
+                else:
+                    st.write(f"- **{name}**")
+
 
 elif page == "Me contacter":
     st.title("Contact DJERIPERFUM")
 
     st.markdown(
         """
-    Informations de contact 
-     Pour toute question ou demande, n'hésitez pas à nous contacter via les moyens suivants :
+    Informations de contact  
+    Pour toute question ou demande, vous pouvez utiliser le formulaire ci-dessous
+    ou les coordonnées directes.
     """
     )
 
-    st.write("Email : contact@djperfum.ma")
+    st.write("Email direct : contact@djperfum.ma")
     st.write("Téléphone : +212 6 25 50 88 21")
+    st.write("Réseau social : https://www.instagram.com/______burna_girl_____/")
+
+    st.markdown("---")
+    st.subheader("Formulaire de contact")
+
+    with st.form("contact_form"):
+        nom = st.text_input("Votre nom")
+        email = st.text_input("Votre email")
+        objet = st.text_input("Objet")
+        message = st.text_area("Votre message")
+
+        submitted = st.form_submit_button("Envoyer")
+
+        if submitted:
+            if not nom or not email or not message:
+                st.error("Merci de remplir au minimum votre nom, email et message.")
+            else:
+                try:
+                    send_contact_email(nom, email, objet, message)
+                    st.success(
+                        "Message envoyé avec succès. Nous vous répondrons dès que possible."
+                    )
+                except Exception as e:
+                    st.error(
+                        "Une erreur est survenue lors de l'envoi du message. "
+                        "Vérifiez la configuration de l'email dans secrets.toml."
+                    )
+                    # Pour debug éventuel en local :
+                    st.write(str(e))
 
 elif page == "Login / Signup":
     st.title("Login / Signup")
