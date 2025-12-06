@@ -1,4 +1,4 @@
-# DJERIPERFUM  Site de vente de parfum avec Assistant intelligent de recommandation de parfums<img width="4513" height="371" alt="image" src="https://github.com/user-attachments/assets/e4f6dedb-9e25-4b00-afd2-e176bed501f4" />
+# <img width="4513" height="371" alt="image" src="https://github.com/user-attachments/assets/e4f6dedb-9e25-4b00-afd2-e176bed501f4" />
 for the  AI bot on perfum web site
 lien du depot github : https://github.com/ZIADEA/djperfum-image
 toute l application en ligne  : https://djperfum-image-fksnza84rdrvv6b4jyjvwu.streamlit.app/
