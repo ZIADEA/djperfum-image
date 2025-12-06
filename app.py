@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 
 import pandas as pd
 import streamlit as st
-
+import streamlit.components.v1 as components 
 # ================== CONFIG GLOBALE ==================
 
 st.set_page_config(
@@ -25,6 +25,87 @@ CHATBOT_URL = (
     "https://cdn.botpress.cloud/webchat/v3.3/shareable.html"
     "?configUrl=https://files.bpcontent.cloud/2025/10/06/14/20251006143331-TLGNO0TS.json"
 )
+PARTICLES_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+  #particles-js {
+    position: fixed;
+    width: 100vw;
+    height: 100vh;
+    top: 0;
+    left: 0;
+    z-index: -1; /* l'animation passe derrière le contenu Streamlit */
+  }
+  </style>
+</head>
+<body>
+  <div id="particles-js"></div>
+  <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
+  <script>
+    particlesJS("particles-js", {
+      "particles": {
+        "number": {
+          "value": 300,
+          "density": {
+            "enable": true,
+            "value_area": 800
+          }
+        },
+        "color": {"value": "#ffffff"},
+        "shape": {
+          "type": "circle",
+          "stroke": {"width": 0, "color": "#000000"}
+        },
+        "opacity": {
+          "value": 0.5,
+          "random": false
+        },
+        "size": {
+          "value": 2,
+          "random": true
+        },
+        "line_linked": {
+          "enable": true,
+          "distance": 100,
+          "color": "#ffffff",
+          "opacity": 0.22,
+          "width": 1
+        },
+        "move": {
+          "enable": true,
+          "speed": 0.2,
+          "direction": "none",
+          "random": false,
+          "straight": false,
+          "out_mode": "out",
+          "bounce": true
+        }
+      },
+      "interactivity": {
+        "detect_on": "canvas",
+        "events": {
+          "onhover": {"enable": true, "mode": "grab"},
+          "onclick": {"enable": true, "mode": "repulse"},
+          "resize": true
+        },
+        "modes": {
+          "grab": {
+            "distance": 100,
+            "line_linked": {"opacity": 1}
+          },
+          "repulse": {"distance": 200, "duration": 0.4}
+        }
+      },
+      "retina_detect": true
+    });
+  </script>
+</body>
+</html>
+"""
 
 # ================== UTILITAIRE RERUN (compat) ======================
 
@@ -602,6 +683,11 @@ st.sidebar.caption("Projet Botpress + Streamlit — DJERIPERFUM")
 if page == "Accueil":
     st.title("DJERIPERFUM – Boutique de décants + conseiller virtuel")
 
+    # Animation de fond
+    components.html(PARTICLES_HTML, height=400, scrolling=False)
+
+    # Contenu de la page d'accueil
+
     st.markdown(
         """
     ### Concept
@@ -612,6 +698,7 @@ if page == "Accueil":
     parfums, tout en bénéficiant de recommandations personnalisées.
     """
     )
+
 
 elif page == "Parfums homme":
     st.title("Parfums Homme")
