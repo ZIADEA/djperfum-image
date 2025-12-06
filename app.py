@@ -19,6 +19,55 @@ st.set_page_config(
 CATALOG_CSV = "Catalogue_Parfums_Complet.csv"   # ton CSV actuel
 USERS_FILE = "users.json"
 COMPO_FILE = "parfums_composition.txt"          # nouveau fichier texte
+# ================== PROMOTIONS ======================
+
+PROMOS = [
+    {
+        "image_id": 5,
+        "label": "Dior Sauvage (10 ml)",
+        "qte_ml": 10,
+        "old_price": 130,
+        "new_price": 115,
+        "description": "-12% sur le décant 10 ml, parfum frais moderne très demandé.",
+        "category": "Homme",
+    },
+    {
+        "image_id": 7,
+        "label": "Lacoste Blanc (10 ml)",
+        "qte_ml": 10,
+        "old_price": 130,
+        "new_price": 110,
+        "description": "-15% sur un parfum frais, propre, idéal pour le quotidien.",
+        "category": "Homme",
+    },
+    {
+        "image_id": 64,
+        "label": "Good Girl (10 ml)",
+        "qte_ml": 10,
+        "old_price": 160,
+        "new_price": 140,
+        "description": "-12% sur ce gourmand sensuel, parfait pour les soirées.",
+        "category": "Femme",
+    },
+    {
+        "image_id": 40,
+        "label": "Chanel Allure (10 ml)",
+        "qte_ml": 10,
+        "old_price": 140,
+        "new_price": 125,
+        "description": "-10% sur un floral élégant pour le travail et les occasions.",
+        "category": "Femme",
+    },
+    {
+        "image_id": 98,
+        "label": "MFK Baccarat Rouge 540 (10 ml)",
+        "qte_ml": 10,
+        "old_price": 400,
+        "new_price": 360,
+        "description": "-10% sur ce parfum niche oriental luxueux.",
+        "category": "Niche",
+    },
+]
 
 # ================== ADMIN ======================
 ADMIN_USERS = ["admin"]  # liste des comptes qui ont l'accès admin
@@ -346,6 +395,19 @@ def get_parfum_by_name(name: str):
 
     return sub.iloc[0]
 
+def get_parfum_by_id(image_id: int):
+    """
+    Retourne la ligne du catalogue pour un given image_id (parfum_id),
+    ou None si introuvable.
+    """
+    if df_catalog is None or df_catalog.empty:
+        return None
+
+    sub = df_catalog[df_catalog["image_id"] == int(image_id)]
+    if sub.empty:
+        return None
+    return sub.iloc[0]
+
 def get_image_path_for_name(name: str) -> str:
     """
     Retourne le chemin d'image pour un parfum donné, à partir de df_catalog.
@@ -641,6 +703,7 @@ if parfum_id_param is not None:
 
 PAGES = [
     "Accueil",
+    "Promotions",
     "Parfums homme",
     "Parfums femme",
     "Parfums mixte / niche",
@@ -707,6 +770,83 @@ if page == "Accueil":
     """
     )
 
+elif page == "Promotions":
+    st.title("Promotions du moment")
+
+    if not PROMOS:
+        st.info("Aucune promotion active pour le moment.")
+    else:
+        user = st.session_state.get("user")
+
+        for idx, promo in enumerate(PROMOS):
+            image_id = promo["image_id"]
+            qte_ml = promo["qte_ml"]
+            old_price = promo["old_price"]
+            new_price = promo["new_price"]
+            desc = promo["description"]
+
+            row = get_parfum_by_id(image_id)
+            if row is None:
+                # sécurité au cas où l'ID n'existe pas dans le CSV
+                st.warning(f"Parfum introuvable pour l'id {image_id} (promo ignorée).")
+                continue
+
+            name = str(row.get("name", promo["label"]))
+            img_path = row.get("image_path", "")
+
+            col_img, col_info, col_actions = st.columns([1, 2, 2])
+
+            with col_img:
+                if img_path:
+                    try:
+                        st.image(img_path, use_container_width=True)
+                    except Exception:
+                        st.write("Image indisponible.")
+                else:
+                    st.write("Image indisponible.")
+
+            with col_info:
+                st.subheader(name)
+                st.write(f"**Offre :** {promo['label']}")
+                st.write(f"**Quantité :** {qte_ml} ml")
+                st.write(f"Ancien prix : ~~{old_price:.0f} DH~~")
+                st.write(f"Nouveau prix : **{new_price:.0f} DH**")
+                st.caption(desc)
+
+                # lien vers fiche détaillée (même logique que dans les listes)
+                st.markdown(
+                    f"[Voir la fiche détaillée](?parfum_id={image_id})",
+                    help="Ouvrir la fiche de ce parfum (image, prix, composition).",
+                )
+
+            with col_actions:
+                if user is None:
+                    st.caption("Connectez-vous pour profiter de cette promotion.")
+                    if st.button(
+                        "Aller à la page Login / Signup",
+                        key=f"promo_login_{idx}",
+                    ):
+                        st.session_state["page"] = "Login / Signup"
+                        do_rerun()
+                else:
+                    units = st.number_input(
+                        "Nombre de flacons",
+                        min_value=1,
+                        max_value=20,
+                        step=1,
+                        value=1,
+                        key=f"promo_units_{idx}",
+                    )
+
+                    if st.button(
+                        "Ajouter au panier (prix promo)",
+                        key=f"promo_add_cart_{idx}",
+                    ):
+                        # On utilise le prix promo + qte_ml promo
+                        add_to_cart(name, new_price, qte_ml, units)
+                        st.success("Ajouté au panier avec la promotion.")
+
+            st.markdown("---")
 
 elif page == "Parfums homme":
     st.title("Parfums Homme")
