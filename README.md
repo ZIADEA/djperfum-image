@@ -29,6 +29,6 @@ Posez vos questions et le bot vous répondra automatiquement via DM :
 ## 🎥 Vidéo démo
 
 - **Drive** : https://drive.google.com/drive/folders/1RnHUbsi_COcb36wQoHQ9FBltqdQs604z?usp=sharing
-- **YouTube** : *(à venir)*
+- **YouTube** : https://youtu.be/LnUGZYWWFdU?si=ZSMrXUcuQ6OQHXb6
 
 </div>
